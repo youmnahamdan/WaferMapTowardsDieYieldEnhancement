@@ -10,49 +10,6 @@ import WaferMap
 import Model 
 import time
 
-"""
-needed code segments and lines:
-    panel.SetBackgroundColour( wx.Colour( 255, 128, 0 ) )
-    panel.SetSize(10,10)
-    
-    
-    # window, proportion, flags '|' in this case border and expantion, border pixel
-    sizer_box = wx.BoxSizer(wx.VERTICAL)
-    sizer_box.Add(widget,0, wx.ALL | wx.CENTER, 5)
-    panel.SetSizer(sizer_box)
-    
-    
-    self.text_ctrl = wx.TextCtrl(panel, pos = (18,18))
-    
-    input_stdf = wx.Button(panel, pos=(18, 50),label='Input')
-    input_stdf.Bind(wx.EVT_BUTTON, self.on_input_click)
-    
-    
-    
-    graphic panel
-    # Create the wafer map
-            self.panel = wm_core.WaferMapPanel(
-                self,
-                self.xyd,
-                self.wafer_info,
-                data_type=DataType.DISCRETE,
-                show_die_gridlines=False,
-            )
-
-"""
-""" 
-GUI
-
-Wafer map graphics are brought by Douglas Thor's
-"""
-
-
-'''Tasks:
--> Restructure and design
-
--> Replace db name by a connectionover the program
-'''
-
 
 class WaferPlotPanel(wx.Panel):
     def __init__(self, parent):
