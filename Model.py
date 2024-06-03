@@ -1,183 +1,190 @@
-import io
-import sqlite3
 import pandas as pd
-import warnings
-import time
-import numpy as np
-from math import sqrt, pow
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt # for data visualization
-
 from sklearn.svm import OneClassSVM
-warnings.filterwarnings('ignore')
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
+from math import sqrt, pow
+import numpy as np
+import io 
+import matplotlib.pyplot as plt # for data visualization
+import matplotlib
+matplotlib.use('Agg') # To use Agg backend to prevent GUI creation in 
 
-
-'''
-Tasks:
--> functions syntax
-
--> Learn how to document tests in report
--> Test on other wafers and adjust hyperparameters
--> Test on scaled data
--> Do a self explaintory multiline comment on each function "explaination  args   returns"
-'''
-
-class die_level_prediction_model:
-    def __init__(self, db_name, mid, kernal = 'sigmoid' , gamma = 0.001, nu = 0.03):
-        self.init_count_df()
-        self.connect_to_db(db_name)
-        self.load_from_db(mid)  # Load wafer information such as center and die dimentions
-        self.calculate_effect_probability()
-        self.calculate_local_yield_8()
-        #self.scale_data()
-        self.svm(kernal, gamma, nu)
-        self.load_vis_data('temporary_data')
-        self.visualize()
-        
-        # Close db connection 
-        self._cursor.close()
-        self._conn.close()
-        return
-    def init_count_df(self):
-        '''
-        This function initializes a dataframe to store information regarding die count. 
-        The information is necessary for visualization and display purposes.
-        
-        Args:
-        Returns:
-        '''
+class die_level_prediction:
+    def __init__(self, db_connection_string, mid, kernel='rbf', gamma='scale', nu=0.06, pool_size=5, max_overflow=10):
+        self.kernel = kernel
+        self.gamma = gamma
+        self.nu = nu
+        self.mid = mid
+        self.db_connection_string = db_connection_string
+        self.pool_size = pool_size
+        self.max_overflow = max_overflow
+        self.die_data_df = None
+        self.scaled_data_df = None
+        self.model = None
+        self.engine = None
+        self.Session = None
+        self.figures_list = []
         self.count_df = pd.DataFrame({
-            'MasterID': [0],
-            'die_count': [0],
-            'good_die_count_before': [0],
-            'bad_die_count_before':[0],
-            'good_die_count_after': [0],
-            'bad_die_count_after':[0]
-        })
+                'MasterID': [0],
+                'die_count': [0],
+                'good_die_count_before': [0],
+                'bad_die_count_before':[0],
+                'good_die_count_after': [0],
+                'bad_die_count_after':[0]
+            })
+        self.connect_to_db()
 
+    def connect_to_db(self):
+        self.engine = create_engine(
+            self.db_connection_string,
+            poolclass=QueuePool,
+            pool_size=self.pool_size,
+            max_overflow=self.max_overflow
+        )
+        self.Session = sessionmaker(bind=self.engine)
+
+    def load_data_from_db(self):
+        """
+        Load data from the database using the provided query.
+        """
+        if not self.engine:
+            raise ValueError("Database engine not initialized. Call connect_to_db first.")
         
-    def connect_to_db(self, db_name):
-        self._conn = sqlite3.connect(db_name)
-        self._cursor = self._conn.cursor()
-        return
-    
-    def load_from_db(self, mid):
-        '''
-        This function loads wafer centers, die dimentions, and data from the database.
+        with self.engine.connect() as connection:
+            self.die_data_df = pd.read_sql('SELECT * FROM die_info WHERE MasterID = ?', connection, params=(self.mid,))
+            result = connection.execute(text('SELECT CenterX, CenterY FROM wafer_config WHERE MasterID = :mid'), {'mid': self.mid})
+            self.centers = result.fetchall()[0]
+            result = connection.execute(text('SELECT DieWidth, DieHeight FROM wafer_config WHERE MasterID = :mid'), {'mid': self.mid})
+            self.die_dim = result.fetchall()[0]
         
-        Args:
-        Returns:
-        '''
-        # Load (Center_X, Center_Y) centers of the wafer
-        self._cursor.execute('SELECT CenterX , CenterY FROM wafer_config WHERE MasterID = ?', (mid,))
-        self.centers = self._cursor.fetchall()[0]  #tuple of centers
-        
-        # Load (DieWidth, DieHeight) Die dimensions
-        self._cursor.execute('SELECT DieWidth, DieHeight FROM wafer_config WHERE MasterID = ?', (mid,))
-        self.die_dim = self._cursor.fetchall()[0]  #tuple of die dimensions
-        
-        # Load die_info table and store in a dataframe
-        self.die_data_df = pd.read_sql_query('SELECT * FROM die_info WHERE MasterID = ?', self._conn, params=(mid,))
-        
-        # Update count_df upon loading data to count dies before prediction
-        self.count_df['MasterID'] = mid
+        # Storing count values
+        self.count_df['MasterID'] = self.mid
         self.count_df['die_count'] = self.die_data_df['Passing'].count()
-        print("die count:  ", self.die_data_df['Passing'].count())
-        
-
         self.count_df['bad_die_count_before']  = self.die_data_df['Passing'].value_counts()[0]
         self.count_df['good_die_count_before'] = self.die_data_df['Passing'].value_counts()[1]
-        print("counts:  ",self.die_data_df['Passing'].value_counts()[0], self.die_data_df['Passing'].value_counts()[1])
-        return 
-    
+
     def calculate_effect_probability(self):
-        '''
-        This fucntion calculates the propabiility of each neighbor to effect referene die, then store'em in a list.
-        
-        Args: 
-        Returns: effect probability list
-        '''
-        # Sum of each neighbor's distance from reference die
-        x, y = self.die_dim
-        total_distance = 4/sqrt(pow(x,2)+pow(y,2)) + 2/x + 2/y
-        
-        # Weight for left and right neighbors
-        weight_l_r = 1/(x/total_distance)
-        
-        # Weight for south and north neighbors
-        weight_s_n = 1/(y/total_distance)
-        
-        # Weight for corner neighbors
-        weight_c = 1/(sqrt(pow(x,2)+pow(y,2))/total_distance)
-        
-        return [weight_c, weight_s_n, weight_c, weight_l_r, weight_l_r, weight_c, weight_s_n, weight_c]
-    
+        """
+        Calculate the effect probability weights for neighboring dies based on their
+        distance from a reference die.
+
+        Returns:
+            List[float]: Weights for the corner, south-north, and left-right neighbors.
+        """
+        try:
+            # Dimensions of the die
+            x, y = self.die_dim
+            
+            # Ensure dimensions are non-zero to avoid division by zero
+            if x <= 0 or y <= 0:
+                raise ValueError("Die dimensions must be positive non-zero values.")
+            
+            # Calculate the total distance for normalization
+            distance_corner = 4 / sqrt(pow(x, 2) + pow(y, 2))
+            distance_lr = 2 / x
+            distance_sn = 2 / y
+            total_distance = distance_corner + distance_lr + distance_sn
+
+            # Calculate weights for each neighbor type
+            weight_corner = distance_corner / total_distance
+            weight_lr = distance_lr / total_distance
+            weight_sn = distance_sn / total_distance
+            
+            # Return weights in a specific order
+            return [weight_corner, weight_sn, weight_corner, weight_lr, weight_lr, weight_corner, weight_sn, weight_corner]
+
+        except TypeError:
+            raise ValueError("Die dimensions must be a tuple or list of two positive numbers.")
+        except Exception as e:
+            raise e
+
     def calculate_local_yield_8(self):
-        print("calculating yield")
-        #add a new column "visited" to track visited dies
-        self.die_data_df['Visited'] = False
-
-        #add a new column "local_region_fail" to store the number of failed dies in the neighborhood
-        self.die_data_df['local_yield'] = 0.0
-        
-        # Add column to hold the distance from the center of the wafer
+        """
+        Calculate the local yield for each die based on its 8 neighbors and store the results
+        in the dataframe.
+        """
+        # Add necessary columns to the dataframe
+        self.die_data_df['Visited'] = False     
         self.die_data_df['distance_from_center'] = 0.0
-        
-        # Since local yield calculations are irreversable I'll trach the number of doog neighbors
+        self.die_data_df['edge'] = False
+        self.die_data_df['local_yield'] = 0.0
         self.die_data_df['good_neighbor'] = 0
-        
-        # Number of dies in a neighborhood 
+        self.die_data_df['bad_neighbor'] = 0
         ith_neighborhood = 8
-        
-        #9-die-neighborhood: a list that containes the base coordinates of all 8 neighbors
-        die_neighborhood = [(-1,1), (0,1),(1,1),(-1,0),(1,0),(-1,-1),(0,-1),(1,-1)]
-        
-        # Probability of neighbor to effect reference die
-        #effect_propability = [0.35, 1, 0.35, 0.79, 0.79, 0.35, 1, 0.35]
-        effect_propability = self.calculate_effect_probability()
-        for index , record in self.die_data_df.iterrows():
-            if not record[-4]:      
+        die_neighborhood = [(-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1)]
+        effect_probability = self.calculate_effect_probability()
+
+        for index, record in self.die_data_df.iterrows():
+            if not record['Visited']:
                 local_yield = 0
-
-                good_neighbors = 0 # a vriable to track faulty neighbors
-
-                die_coords = (record[2], record[3],)
+                good_neighbors = 0
+                bad_neighbors = 0 ############3
+                neighbors = 0
+                die_coords = (record['DieX'], record['DieY'])
 
                 for i in range(ith_neighborhood):
-                    
-                    neighbor = tuple(int(item_1 * item_2 + item_3) for item_1 , item_2 , item_3 in zip(die_neighborhood[i],self.die_dim , die_coords))
+                    neighbor_coords = tuple(die_neighborhood[i][j] + die_coords[j] for j in range(2))
+                    pass_fail = self.die_data_df.loc[
+                        (self.die_data_df['DieX'] == neighbor_coords[0]) & 
+                        (self.die_data_df['DieY'] == neighbor_coords[1]), 
+                        'Passing'
+                    ]
 
-                    pass_fail = self.die_data_df.loc[(self.die_data_df['DieX'] == neighbor[0]) & (self.die_data_df['DieY'] == neighbor[1]), 'Passing']
                     if not pass_fail.empty:
-                        if pass_fail.values[0] == 1:  #if the die is not visited and passes parametric tests 
+                        neighbors += 1
+                        if pass_fail.values[0] == 1:  # Die passes parametric tests
                             good_neighbors += 1
-                            local_yield += effect_propability[i]
+                            local_yield += effect_probability[i]
+                        else: ########
+                            bad_neighbors +=1########3
                 
-                self.die_data_df.loc[index, 'Visited'] = True
-                
-                self.die_data_df.loc[index, 'good_neighbor'] = good_neighbors
-                
-                self.die_data_df.loc[index, 'distance_from_center'] = sqrt(pow(die_coords[0]-self.centers[0],2)+pow(die_coords[1]-self.centers[1],2))
-                
-                #insert to local_region_fail column
-                self.die_data_df.loc[index, 'local_yield'] =  float(local_yield / good_neighbors) if good_neighbors > 0 else 0
-        
-        return
-    
-    def calculate_local_failure_24(self):
-        return
-    
-    def scale_data(self):
-        # Transform the dataframe using the fit_transform method
-        self.scaled_data = StandardScaler().fit_transform(self.die_data_df)
+                # Update dataframe with calculated values
+                self.die_data_df.at[index, 'Visited'] = True
+                self.die_data_df.at[index, 'good_neighbor'] = good_neighbors
+                self.die_data_df.at[index, 'distance_from_center'] = sqrt(
+                    pow(die_coords[0] - self.centers[0], 2) + pow(die_coords[1] - self.centers[1], 2)
+                )
+                self.die_data_df.at[index, 'local_yield'] = local_yield
+                self.die_data_df.at[index, 'edge'] = (neighbors < 8)
+                self.die_data_df.at[index, 'bad_neighbor'] = bad_neighbors
 
-        # Transform to a dataframe (using original column names)
-        self.scaled_data_df = pd.DataFrame(self.scaled_data, columns=self.die_data_df.columns)
-        return
+        # Calculate bad neighbors
+        #self.die_data_df['bad_neighbor'] = ith_neighborhood - self.die_data_df['good_neighbor']
+
+    def train_ocsvm(self):
+
+        # Extract the features to train the model     
+        self.features = self.die_data_df.loc[(self.die_data_df['edge'] == False) & (self.die_data_df.bad_neighbor.between(2,8)),['bad_neighbor','local_yield']]
+        
+        # Initialize and train the One-Class SVM model
+        self.model = OneClassSVM(kernel = self.kernel, gamma = self.gamma, nu = self.nu )
+        self.model.fit(self.features)
+
+    def predict(self):
+        """
+        Predict anomalies using the trained One-Class SVM model.
+        """
+        if self.model is None:
+            raise ValueError("Model must be trained before making predictions.")
+
+        # Predict using the trained model
+        predictions = self.model.predict(self.features)
+        
+        outliers_index = np.where(predictions == -1)[0]
+        outliers = self.features.iloc[outliers_index]
+        self.num_outliers = len(outliers)
+        # Mark outliers as faulty
+        self.die_data_df.loc[self.features.iloc[outliers_index].index, 'Passing'] = 0
+        
+        count_pass = self.die_data_df['Passing'].value_counts()
+        self.count_df['bad_die_count_after']  = count_pass[0]
+        self.count_df['good_die_count_after'] = count_pass[1]
+        
+        return predictions, outliers
     
     def visualize(self):
-        self.figures_list = []  # Initialize a list to store figures
-        
         # 2D die_count to propability visualization
         plt.figure()
         yield_die_count = self.die_data_df['local_yield'].value_counts()
@@ -191,8 +198,8 @@ class die_level_prediction_model:
         buf.seek(0)
         plt.close()
         self.figures_list.append(buf)
-        
-        
+
+
         # 2D die_count to HW Bin visualization
         plt.figure()
         HWB_die_count = self.die_data_df['HardwareBin'].value_counts()
@@ -221,45 +228,43 @@ class die_level_prediction_model:
         plt.close()
         self.figures_list.append(buf)
         
-        return
+        print(self.figures_list)
 
-    def svm(self, kernal = 'sigmoid' , gamma = 0.001, nu = 0.03):
-        print("in model")
-        svm = OneClassSVM(kernel = kernal, gamma = gamma, nu = nu)
-        
-        # Make prediction
-        prediction = svm.fit_predict(self.die_data_df[['good_neighbor','local_yield']])
-        
-        # Find outliers and extract from original data
-        outlier_index = np.where(prediction == -1)
-        outliers = self.die_data_df.loc[outlier_index]
-        self.num_outliers = len(outliers)
-        
-        # Mark outliers as faulty
-        self.die_data_df.loc[outlier_index[0], 'Passing'] = 0 
-        
-        # Update count_df after prediction
-        self.count_df['bad_die_count_after']  = self.die_data_df['Passing'].value_counts()[0]
-        self.count_df['good_die_count_after'] = self.die_data_df['Passing'].value_counts()[1]
-        print("counts:  ",self.die_data_df['Passing'].value_counts()[0], self.die_data_df['Passing'].value_counts()[1])
-        
     def load_vis_data(self, table_name):
-        '''
+        """
         This function loads data after prediction to the database.
-        '''
-        print("in loading")
-        # Empty table before using
-        self._cursor.execute(f'DELETE FROM {table_name}')
-        # Insert DataFrame into SQL table
-        self.die_data_df.to_sql(table_name, self._conn, if_exists='replace', index=False)
-        return
+        """
+        if not self.engine:
+            raise ValueError("Database engine not initialized.")
         
-    
-def main(db_name, mid, kernal = 'sigmoid' , gamma = 0.001, nu = 0.03):
-    model = die_level_prediction_model(db_name, mid, kernal = kernal, gamma = gamma, nu = nu)
-    return (model.num_outliers, model.count_df , model.figures_list)
+        with self.engine.connect() as connection:
+            self.die_data_df.drop(['edge', 'bad_neighbor'], axis=1, inplace=True)
 
-if __name__=="__main__":
-    count_df , figure_list = main("database.db", 3)
-    print("count_df:  ",count_df)
-    print("figure_list:  ",figure_list)
+            # Insert DataFrame into SQL table
+            self.die_data_df.to_sql(table_name, connection, if_exists='replace', index=False)
+        
+
+def main(db_connection_string, mid, kernel='rbf', gamma='scale', nu=0.06):#, pool_size=5, max_overflow=10):
+    
+    anomaly_detector = die_level_prediction(db_connection_string, mid, kernel= kernel, gamma= gamma, nu= nu)#, pool_size=pool_size, max_overflow=max_overflow)
+
+    # Load data from the database
+    anomaly_detector.load_data_from_db()
+    anomaly_detector.calculate_local_yield_8()
+
+    # Train the OCSVM model
+    anomaly_detector.train_ocsvm()
+
+    # Make predictions
+    predictions, outliers = anomaly_detector.predict()
+    anomaly_detector.visualize()
+    # Load visual data
+    anomaly_detector.load_vis_data('temporary_data')
+    
+    anomaly_detector.Session.close_all()
+    return anomaly_detector.num_outliers , anomaly_detector.count_df, anomaly_detector.figures_list
+
+if __name__ == "__main__":
+    db_connection_string = 'sqlite:///C:/Users/hp/OneDrive/Desktop/WaferMap/WaferMap/database.db'
+    mid = 4
+    print(main(db_connection_string, mid))

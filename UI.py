@@ -1,7 +1,9 @@
+from math import e
 from telnetlib import NOP
 import wx 
 import wx.grid as gridlib
-import sqlite3 
+import sqlite3
+import threading
 from threading import Thread
 from wafer_map import wm_info, wm_app, wm_core
 from wafer_map.wm_constants import DataType
@@ -47,8 +49,22 @@ class WaferPlotPanel(wx.Panel):
         return  
     
     def Update(self, db_name, mid ):
+        # Remove the graphical panels in case they exist
+        try:
+            self.vbox_l.Detach(self.left_panel)
+            self.vbox_r.Detach(self.right_panel)
+        
+            # Destroy the panel
+            self.left_panel.Destroy()
+            self.right_panel.Destroy()
+        
+            self.left_panel = None
+            self.right_panel = None
+        except:
+            print("First plotting attempt")
+            
         # Create a new connection to avoid thread-safty issues
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(db_name)
         cursor = conn.cursor()
     
         #retrive wafer information
@@ -143,8 +159,8 @@ class WaferMapVisPanel(wx.Panel):
             wx_image.SetAlpha(image.convert('RGBA').tobytes()[3::4])
             
             # Resize the wx.Image
-            new_width = (width/2)*1.2
-            new_height = (height/2)*1.2
+            new_width = int((width/2)*1.2)
+            new_height = int((height/2)*1.2)
             wx_image = wx_image.Rescale(new_width, new_height, wx.IMAGE_QUALITY_HIGH)
             
             # Convert wx.Image to wx.Bitmap and display it in the StaticBitmap
@@ -184,19 +200,19 @@ class ModelPanel(wx.Panel):
         super().__init__(parent)
         
         # Outputs
-        lbl1 = wx.StaticText(self, label='Model Outputs')
+        lbl1 = wx.StaticText(self, label='Model Outputs: Number of Outliers')
         self.outlier_txt = wx.TextCtrl(self)
         self.outlier_txt.SetEditable(False)
         
         # Inputs
         lbl2 = wx.StaticText(self, label='Model inputs (Optional)')
-        self.kernal_txt = wx.TextCtrl(self)
+        self.kernel_txt = wx.TextCtrl(self)
         self.gamma_txt = wx.TextCtrl(self)
         self.nu_txt = wx.TextCtrl(self)
         
         hbox = wx.BoxSizer(wx.HORIZONTAL)
-        hbox.Add(wx.StaticText(self, label='Kernal: '), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 3)
-        hbox.Add(self.kernal_txt, 1, wx.ALL | wx.EXPAND, 3)
+        hbox.Add(wx.StaticText(self, label='Kernel: '), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 3)
+        hbox.Add(self.kernel_txt, 1, wx.ALL | wx.EXPAND, 3)
         hbox.Add(wx.StaticText(self, label='Gamma: '), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 3)
         hbox.Add(self.gamma_txt, 1, wx.ALL | wx.EXPAND, 3)
         hbox.Add(wx.StaticText(self, label='Nu: '), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 3)
@@ -361,7 +377,7 @@ class DieInfoPanel(wx.Panel):
         self.grid.SetColLabelValue(12, "Good neighbors")
         
         self.grid.SetDefaultColSize(85)
-        
+
         # Add a sizer to manage the layout of child widgets
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(wx.StaticText(self, label = 'Search Results'), 0, wx.EXPAND)
@@ -371,7 +387,10 @@ class DieInfoPanel(wx.Panel):
         self.SetSizer(sizer)
     def Update(self, data):
         for index, item in enumerate(data):
+            print(len(data))
             self.grid.SetCellValue(0, index, str(item))
+            
+
 
 class SearchBarPanel(wx.Panel):
     def __init__(self, parent, db_name):
@@ -405,9 +424,10 @@ class SearchBarPanel(wx.Panel):
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         try:
-            cursor.execute('SELECT * FROM temporary_data WHERE MasterID = ? and DieID = ?',  (self.parent.mid, int(self.search_ctrl.GetValue())))
-            data = cursor.fetchall()[0]
-            self.parent.main_panel.die_info_pan.Update(data) 
+            if self.search_ctrl.GetValue().strip():
+                cursor.execute('SELECT * FROM temporary_data WHERE MasterID = ? and DieID = ?',  (self.parent.mid, int(self.search_ctrl.GetValue().strip())))
+                data = cursor.fetchall()[0]
+                self.parent.main_panel.die_info_pan.Update(data) 
         except:
             wx.MessageBox(f"Die ID must be an INTEGER","Error", wx.ICON_ERROR)
         finally:
@@ -430,7 +450,7 @@ class PredictPanel(wx.Panel):
 
 class WaferMapFrame(wx.Frame):
     def __init__(self):
-        super().__init__(parent=None, title='Wafer Map GUI')
+        super().__init__(parent=None, title='Wafer Map Towards Die Yield Enhancement')
         self._db_name = "database.db"
 
         # Panels
@@ -512,58 +532,18 @@ class WaferMapFrame(wx.Frame):
                 self.parse_thread = Thread(target=self.App_for_file_chooser)
                 self.parse_thread.daemon = False
                 self.parse_thread.start()
-               
 
                 # Start a timer to check for the thread status
                 self.timer = wx.Timer(self)
                 self.Bind(wx.EVT_TIMER, self.on_timer)
                 self.timer.Start(100)
                 
-            
             except Exception as e:
                 # Show an error message dialog if something goes wrong
                 wx.MessageBox(f"An error occurred while processing the file: {str(e)}", "Error", wx.ICON_ERROR)
 
 
         dlg.Destroy()
-     
-    def on_timer(self, event):
-        if not self.parse_thread.is_alive():
-            try:
-                self.timer.Stop()
-                self.status_bar.SetStatusText("Parsing is done")
-                self.predict_panel.predict_btn.Enable()
-                self.main_panel.vis_panel.Update(self.figure_list)
-                self.MenuBar.Enable(self.open_file_menu_item.GetId(), True)
-                self.plot_panel.Update(self._db_name, self.mid)
-                wx.MessageBox(f"Parsing is over MID: {self.mid}","Information", wx.ICON_INFORMATION)
-            except:
-                NOP
-
-    def display_vis_panel(self,event):  # Open visualization panel 
-        self.main_panel.Hide()
-        self.predict_panel.Hide()
-        self.search_panel.Hide()
-        self.plot_panel.Show()
-        self.Layout()
-        
-    def display_main_panel(self,event):  # Open main panel 
-        self.plot_panel.Hide()
-        self.main_panel.Show()
-        self.predict_panel.Show()
-        self.search_panel.Show()
-        self.Layout()
-        
-    def App_for_file_chooser(self):
-        self.MenuBar.Enable(self.open_file_menu_item.GetId(), False)
-        # Call parser and loader
-        self.status_bar.SetStatusText("Parsing started...")
-        self.predict_panel.predict_btn.Disable()
-        
-        
-        self.mid, self.lid,self.wid = WaferMap.main(self.file_path, self._db_name)
-
-        self.predict()
         
     def on_predict_click(self, event):
         try:
@@ -572,7 +552,6 @@ class WaferMapFrame(wx.Frame):
             self.parse_thread = Thread(target=self.App_for_mid_insertion)
             self.parse_thread.daemon = False
             self.parse_thread.start()
-               
 
             # Start a timer to check for the thread status
             self.timer = wx.Timer(self)
@@ -584,13 +563,46 @@ class WaferMapFrame(wx.Frame):
             # Show an error message dialog if something goes wrong
             wx.MessageBox(f"An error occurred while processing the file: {str(e)}", "Error", wx.ICON_ERROR)
 
+    def on_timer(self, event):
+        if not self.parse_thread.is_alive():
+                self.timer.Stop()
+                self.status_bar.SetStatusText("Done")
+                self.predict_panel.predict_btn.Enable()
+                self.MenuBar.Enable(self.open_file_menu_item.GetId(), True)
+            
+                try:
+                    self.main_panel.model_pan.outlier_txt.SetValue(str(self.num_ouliers))
+                    self.main_panel.wafer_info_panel.Update(self.lid,self.wid,self.count_df)                
+                    self.plot_panel.Update(self._db_name, self.mid)
+                    self.main_panel.vis_panel.Update(self.figure_list)
+                    wx.MessageBox(f"Parsing is over MID: {self.mid}","Information", wx.ICON_INFORMATION)
+                except Exception as e:
+                    #wx.MessageBox(f"An error occurred while processing: {str(e)}", "Error", wx.ICON_ERROR)
+                    NOP
+
+
+    def App_for_file_chooser(self):
+         try:    
+            self.MenuBar.Enable(self.open_file_menu_item.GetId(), False)
+            # Call parser and loader
+            self.status_bar.SetStatusText("Parsing started...")
+            self.predict_panel.predict_btn.Disable()
+        
+        
+            self.mid, self.lid,self.wid = WaferMap.main(self.file_path, self._db_name)
+
+            self.predict()
+            
+         except:
+            wx.MessageBox(f"File is corrupted or incomplete", "Error", wx.ICON_ERROR)
+        
+    
     def App_for_mid_insertion(self):
         self.MenuBar.Enable(self.open_file_menu_item.GetId(), False)
         try:
             # Call parser and loader
             self.status_bar.SetStatusText("Parsing started...")
             self.predict_panel.predict_btn.Disable()
-            #self.MenuBar.Enable(wx.ID_OPEN, False)
         
             self.mid = int(self.predict_panel.mid_txt.GetValue())
             conn = sqlite3.connect(self._db_name)
@@ -609,12 +621,13 @@ class WaferMapFrame(wx.Frame):
         try:
             # Call model
             self.status_bar.SetStatusText("Prediction started...")
-            # Check if model inputs containa a value
-            kernal, gamma, nu = ('sigmoid', 0.001, 0.03)
+            
+            # Check if model inputs contain a value
+            kernel, gamma, nu = ('rbf', 'scale', 0.06)
         
-            if self.main_panel.model_pan.kernal_txt.GetValue().strip():
-                kernal = self.main_panel.model_pan.kernal_txt.GetValue().strip()
-                print('kernal ', kernal)
+            if self.main_panel.model_pan.kernel_txt.GetValue().strip():
+                kernel = self.main_panel.model_pan.kernel_txt.GetValue().strip()
+                print('kernel ', kernel)
             if self.main_panel.model_pan.gamma_txt.GetValue().strip():
                 gamma = float(self.main_panel.model_pan.gamma_txt.GetValue().strip())
                 print('gamma ', gamma)
@@ -622,23 +635,31 @@ class WaferMapFrame(wx.Frame):
                 nu = float(self.main_panel.model_pan.nu_txt.GetValue().strip())
                 print('nu ', nu)
             
-
-            self.num_ouliers, self.count_df, self.figure_list = Model.main(self._db_name, self.mid,kernal = kernal, gamma = gamma, nu = nu)
-            self.main_panel.model_pan.outlier_txt.SetValue(str(self.num_ouliers))
-            self.main_panel.wafer_info_panel.Update(self.lid,self.wid,self.count_df)
-            
-            
+            self.db_string ='sqlite:///C:/Users/hp/OneDrive/Desktop/WaferMap/WaferMap/database.db'
+            self.num_ouliers, self.count_df, self.figure_list = Model.main(self.db_string, self.mid,kernel = kernel, gamma = gamma, nu = nu)            
 
         except:
-            kernal, gamma, nu = ('sigmoid', 0.001, 0.03)
-            wx.MessageBox(f"Model inputs unvalid. Prediction will happen with default values (kernal = {kernal} , gamma = {gamma} , nu = {nu}.","Error", wx.ICON_ERROR)
-            self.num_ouliers, self.count_df, self.figure_list = Model.main(self._db_name, self.mid,kernal = kernal, gamma = gamma, nu = nu)
-            self.main_panel.model_pan.outlier_txt.SetValue(str(self.num_ouliers))
-            self.main_panel.wafer_info_panel.Update(self.lid,self.wid,self.count_df)
-            self.plot_panel.Update(self.cursor, self.mid)
-        
+            kernel, gamma, nu = ('rbf', 'scale', 0.06)
+            wx.MessageBox(f"Model inputs unvalid. Prediction will happen with default values (kernael = {kernel} , gamma = {gamma} , nu = {nu}.","Error", wx.ICON_ERROR)
+            self.num_ouliers, self.count_df, self.figure_list = Model.main(self.db_string, self.mid,kernel = kernel, gamma = gamma, nu = nu)
+                
     def save_file_dir(self, file_path):
         self.file_path = file_path
+        
+    def display_vis_panel(self,event):  # Open visualization panel 
+        self.main_panel.Hide()
+        self.predict_panel.Hide()
+        self.search_panel.Hide()
+        self.plot_panel.Show()
+        self.Layout()
+        
+    def display_main_panel(self,event):  # Open main panel 
+        self.plot_panel.Hide()
+        self.main_panel.Show()
+        self.predict_panel.Show()
+        self.search_panel.Show()
+        self.Layout()
+        
 
 def Main():
     
@@ -647,7 +668,7 @@ def Main():
     
     #instantiate a frame
     frame = WaferMapFrame()
-    
+    frame.Maximize(True)
     # set the main loop to keep the window on view
     app.MainLoop()
     
