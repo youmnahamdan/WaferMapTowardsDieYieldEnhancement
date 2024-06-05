@@ -372,8 +372,8 @@ class DieInfoPanel(wx.Panel):
         self.grid.SetColLabelValue(7, "Part Flag")
         self.grid.SetColLabelValue(8, "Passing")
         self.grid.SetColLabelValue(9, "Visited")
-        self.grid.SetColLabelValue(10, "Yield")
-        self.grid.SetColLabelValue(11, "Distance from center")
+        self.grid.SetColLabelValue(10, "Distance from center")
+        self.grid.SetColLabelValue(11, "Yield")
         self.grid.SetColLabelValue(12, "Good neighbors")
         
         self.grid.SetDefaultColSize(85)
@@ -429,7 +429,7 @@ class SearchBarPanel(wx.Panel):
                 data = cursor.fetchall()[0]
                 self.parent.main_panel.die_info_pan.Update(data) 
         except:
-            wx.MessageBox(f"Die ID must be an INTEGER","Error", wx.ICON_ERROR)
+            wx.MessageBox(f"Die ID must be an INTEGER, and EXIST within wafer","Error", wx.ICON_ERROR)
         finally:
             cursor.close()    
             conn.close()
@@ -527,19 +527,20 @@ class WaferMapFrame(wx.Frame):
             self.save_file_dir(dlg.GetPath())
             
             try:
-                #self.status_bar.SetStatusText("Process started...")
-                # Call the parser/loader with the selected file path
                 self.parse_thread = Thread(target=self.App_for_file_chooser)
                 self.parse_thread.daemon = False
                 self.parse_thread.start()
 
-                # Start a timer to check for the thread status
+
+  
+                print(f"open file: {self.parse_thread.ident}")
+
+                # Check thread status
                 self.timer = wx.Timer(self)
                 self.Bind(wx.EVT_TIMER, self.on_timer)
                 self.timer.Start(100)
                 
             except Exception as e:
-                # Show an error message dialog if something goes wrong
                 wx.MessageBox(f"An error occurred while processing the file: {str(e)}", "Error", wx.ICON_ERROR)
 
 
@@ -547,20 +548,16 @@ class WaferMapFrame(wx.Frame):
         
     def on_predict_click(self, event):
         try:
-            #self.status_bar.SetStatusText("Process started...")
-            # Call the parser/loader with the selected file path
             self.parse_thread = Thread(target=self.App_for_mid_insertion)
             self.parse_thread.daemon = False
             self.parse_thread.start()
 
-            # Start a timer to check for the thread status
             self.timer = wx.Timer(self)
             self.Bind(wx.EVT_TIMER, self.on_timer)
             self.timer.Start(100)
                 
             
         except Exception as e:
-            # Show an error message dialog if something goes wrong
             wx.MessageBox(f"An error occurred while processing the file: {str(e)}", "Error", wx.ICON_ERROR)
 
     def on_timer(self, event):

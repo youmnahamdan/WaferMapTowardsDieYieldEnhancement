@@ -24,6 +24,10 @@ class Loader:
             self._cursor = self._conn.cursor()
 
 
+    @classmethod
+    def reset_instance(cls):
+        cls._instance = None
+
     def retrieve_data(self, table_name, query=None, params=None):
         """Retrieves data from a table.
 
@@ -95,8 +99,18 @@ class Loader:
                     return
 
         self._conn.commit()
+        IDs = self.retrieve_data("wafer_info", "SELECT * FROM wafer_info WHERE MasterID = ?", params=(self._wafer_id,))[0]
+
+        self._cursor.close()
+        self._conn.close()
+        return IDs
         
-    def get_IDs(self):
-        return self.retrieve_data("wafer_info", "SELECT * FROM wafer_info WHERE MasterID = ?", params=(self._wafer_id,))[0]
+        
+'''    def get_IDs(self):
+        IDS = self.retrieve_data("wafer_info", "SELECT * FROM wafer_info WHERE MasterID = ?", params=(self._wafer_id,))[0]
+        
+        print(IDS)
+        print(type(IDS))
+        return IDS'''
 
     
