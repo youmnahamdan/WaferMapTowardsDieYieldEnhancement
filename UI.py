@@ -1,4 +1,3 @@
-from math import e
 from telnetlib import NOP
 import wx 
 import wx.grid as gridlib
@@ -11,7 +10,6 @@ from PIL import Image
 import WaferMap
 import Model 
 import time
-
 
 class WaferPlotPanel(wx.Panel):
     def __init__(self, parent):
@@ -481,6 +479,7 @@ class WaferMapFrame(wx.Frame):
         self.plot_panel.Hide()
         
         self.Show()
+        self.Maximize(True)
        
         
     def create_menu(self):
@@ -632,13 +631,13 @@ class WaferMapFrame(wx.Frame):
                 nu = float(self.main_panel.model_pan.nu_txt.GetValue().strip())
                 print('nu ', nu)
             
-            self.db_string ='sqlite:///C:/Users/hp/OneDrive/Desktop/WaferMap/WaferMap/database.db'
-            self.num_ouliers, self.count_df, self.figure_list = Model.main(self.db_string, self.mid,kernel = kernel, gamma = gamma, nu = nu)            
+            
+            self.num_ouliers, self.count_df, self.figure_list = Model.main(self._db_name, self.mid,kernel = kernel, gamma = gamma, nu = nu)            
 
         except:
             kernel, gamma, nu = ('rbf', 'scale', 0.06)
             wx.MessageBox(f"Model inputs unvalid. Prediction will happen with default values (kernael = {kernel} , gamma = {gamma} , nu = {nu}.","Error", wx.ICON_ERROR)
-            self.num_ouliers, self.count_df, self.figure_list = Model.main(self.db_string, self.mid,kernel = kernel, gamma = gamma, nu = nu)
+            self.num_ouliers, self.count_df, self.figure_list = Model.main(self._db_name, self.mid,kernel = kernel, gamma = gamma, nu = nu)
                 
     def save_file_dir(self, file_path):
         self.file_path = file_path
@@ -660,13 +659,13 @@ class WaferMapFrame(wx.Frame):
 
 def Main():
     
-    #creating the application
+    # Creating the application
     app = wx.App()
     
-    #instantiate a frame
+    # Instantiate a frame
     frame = WaferMapFrame()
-    frame.Maximize(True)
-    # set the main loop to keep the window on view
+    
+    # Set the main loop to keep the window on view
     app.MainLoop()
     
     return

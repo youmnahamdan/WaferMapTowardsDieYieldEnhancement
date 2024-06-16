@@ -1,12 +1,18 @@
-from numpy import void
+"""
 
+DieInfo class is used to store dies data. 
 
+DieInfo instances are inserted into a queue. The
+data within each instance is extracted then inserted
+into the database. 
+
+"""
 class DieInfo:
     def __init__(self, number, site):
-        self.info = None  # Store configuration data
-        self.number = number; # Store part id
-        self.site = site
-        self.test_results = [] # Store test results
+        self.info = None        # Store wafer configuration data
+        self.number = number;   # Store part id
+        self.site = site        # Store site number
+        self.test_results = []  # Store test results
 
     def set_info(self, info):
         self.info = info
