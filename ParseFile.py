@@ -116,11 +116,6 @@ class ParseFile():
             # Extract wafer_size [wafer diameter] die height and width  R*4
             self.wafer_size, self.DIE_HT, self.DIE_WID = struct.unpack('<fff', self.record[0:12])
             
-            # Calculate dimensions
-            self.wafer_size *= WF_UNITS
-            self.DIE_HT *= WF_UNITS
-            self.DIE_WID *= WF_UNITS
-            
             # Extract orientation of wafer flat  C*1
             self.WF_FLAT = chr(self.record[13])
 
