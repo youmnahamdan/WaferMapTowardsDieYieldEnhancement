@@ -10,3 +10,15 @@ wish me luck!!!
 #### Prerequisites
 #### Notes
 
+### UI and demonstration
+
+### STDF files
+#### Useful tool for reading stdf files
+
+### Parsing STDF files
+
+### Database
+3NF
+
+### ML model
+
