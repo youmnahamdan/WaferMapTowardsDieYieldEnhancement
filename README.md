@@ -1,24 +1,9 @@
-# MyWaferMap
+# Wafer Map Towards Die Yield Enhancement
 
-## Still working on README file
+# Basic Overview
+A software tool designed to detect potential poor yielding dice based on Nearest Neighbour Analysis.
+<img of UI>
+<demonstrative img of project workflow>
 
-If you are attempting to run the tool UI module contains the script necessary to do so.
-wish me luck!!!
 
-# Tool Documentation
-### What is Wafer Map Towards Die Yield Enhancement?
-#### Prerequisites
-#### Notes
-
-### UI and demonstration
-
-### STDF files
-#### Useful tool for reading stdf files
-
-### Parsing STDF files
-
-### Database
-3NF
-
-### ML model
 
